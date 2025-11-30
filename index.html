@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom Face Attendance</title>
+    <!-- 
+        EDUCATIONAL NOTE:
+        We are loading the 'face-api.js' library from a CDN (Content Delivery Network).
+        This library does all the heavy lifting: finding faces and comparing them.
+        Make sure you have Internet access to load this script!
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --success: #2ecc71;
+            --danger: #e74c3c;
+            --bg: #f5f7fa;
+            --panel: #ffffff;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        /* Layout Containers */
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1200px;
+            width: 100%;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .video-panel {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls-panel {
+            flex: 1;
+            min-width: 300px;
+            background: var(--panel);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Video & Canvas */
+        #videoElement {
+            display: block;
+            /* Hidden by default, shown for webcam */
+            max-width: 640px;
+            max-height: 480px;
+        }
+
+        #canvasOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        #espImage {
+            display: none;
+            /* Shown for ESP32 */
+            max-width: 640px;
+            max-height: 480px;
+        }
+
+        /* UI Elements */
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .status-box {
+            padding: 10px;
+            background: #eee;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        /* Attendance List */
+        .attendance-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border-top: 2px solid #eee;
+            margin-top: 10px;
+        }
+
+        .student-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .student-row.present {
+            background-color: #e8f8f5;
+        }
+
+        /* Startup Overlay */
+        #startupOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .source-card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .big-btn {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 15px;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- 1. STARTUP SELECTION SCREEN -->
+    <div id="startupOverlay">
+        <div class="source-card">
+            <h2>Welcome to Class Attendance</h2>
+            <p>Please select your camera source:</p>
+
+            <button class="btn-primary big-btn" onclick="selectSource('webcam')">
+                💻 Use Laptop Webcam
+            </button>
+
+            <div style="margin: 15px 0; border-top: 1px solid #eee; padding-top: 15px;">
+                <label style="font-size: 0.9em; color: #666;">ESP32 IP Address:</label>
+                <input type="text" id="espIpInput" value="192.168.4.1" placeholder="e.g. 192.168.1.100">
+                <button class="btn-success big-btn" onclick="selectSource('esp32')">
+                    📸 Use ESP32-CAM
+                </button>
+            </div>
+            <p style="font-size: 0.8em; color: #888;">
+                Note: If using ESP32 in AP mode, your laptop might lose internet.
+                Ensure 'face-api.js' is loaded first!
+            </p>
+        </div>
+    </div>
+
+    <h1>📸 Smart Classroom Attendance</h1>
+
+    <div class="container">
+        <!-- 2. VIDEO DISPLAY AREA -->
+        <div class="video-panel" id="videoContainer">
+            <!-- For Webcam -->
+            <video id="videoElement" autoplay muted playsinline></video>
+            <!-- For ESP32 -->
+            <img id="espImage" src="" alt="ESP32 Stream" crossorigin="anonymous">
+            <!-- Drawing Overlay -->
+            <canvas id="canvasOverlay"></canvas>
+        </div>
+
+        <!-- 3. CONTROL PANEL -->
+        <div class="controls-panel">
+
+            <!-- Status Info -->
+            <div class="status-box">
+                <div><strong>Status:</strong> <span id="statusText">Loading models...</span></div>
+                <div><strong>Source:</strong> <span id="sourceText">None</span></div>
+                <div><strong>Enrolled Students:</strong> <span id="enrolledCount">0</span></div>
+            </div>
+
+            <hr>
+
+            <!-- Enrollment Section -->
+            <div>
+                <h3>1. Enroll Student</h3>
+                <input type="text" id="studentName" placeholder="Enter Student Name">
+                <br><br>
+                <button class="btn-primary" id="btnEnroll" onclick="startEnrollment()" disabled>
+                    Enroll Face (Take 3 Samples)
+                </button>
+                <p id="enrollMsg" style="font-size: 0.8em; color: #666;"></p>
+            </div>
+
+            <hr>
+
+            <!-- Recognition Section -->
+            <div>
+                <h3>2. Take Attendance</h3>
+                <button class="btn-success" id="btnRecognize" onclick="toggleRecognition()" disabled>
+                    ▶ Start Recognition
+                </button>
+                <div style="margin-top: 10px;">
+                    <label>Confidence Threshold:</label>
+                    <input type="range" id="thresholdSlider" min="0.4" max="0.9" step="0.05" value="0.6"
+                        onchange="updateThreshold(this.value)">
+                    <span id="thresholdValue">0.6</span>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- Data & Export -->
+            <div>
+                <h3>3. Data</h3>
+                <button onclick="downloadCSV()">📂 Export CSV</button>
+                <button class="btn-danger" onclick="clearAttendance()">🗑️ Clear Session</button>
+            </div>
+
+            <!-- Attendance List -->
+            <div class="attendance-list" id="attendanceList">
+                <!-- Rows added here by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // GLOBAL VARIABLES
+        // =====================================================================
+        let useESP32 = false;
+        let espIP = "192.168.4.1";
+        let isRecognizing = false;
+        let labeledDescriptors = []; // Stores the "math" of enrolled faces
+        let attendance = {};         // Stores who is present: { "Name": "Time" }
+
+        // Settings
+        const SAMPLES_TO_TAKE = 3;   // How many photos to take for enrollment
+        let MATCH_THRESHOLD = 0.6;   // Strictness: 0.4 (loose) to 0.8 (strict)
+
+        // HTML Elements
+        const videoEl = document.getElementById('videoElement');
+        const imgEl = document.getElementById('espImage');
+        const canvas = document.getElementById('canvasOverlay');
+        const statusText = document.getElementById('statusText');
+
+        // =====================================================================
+        // 1. INITIALIZATION & MODEL LOADING
+        // =====================================================================
+
+        // Load AI models immediately when page opens
+        Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'),
+            faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'),
+            faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model')
+        ]).then(() => {
+            console.log("Models Loaded!");
+            statusText.innerText = "Models Loaded. Select Camera.";
+            loadEnrollments(); // Load saved students from localStorage
+        }).catch(err => {
+            console.error("Model Load Error:", err);
+            statusText.innerText = "Error loading AI models. Check Internet?";
+        });
+
+        // Called when user clicks a button on the startup screen
+        async function selectSource(source) {
+            document.getElementById('startupOverlay').style.display = 'none';
+
+            if (source === 'webcam') {
+                useESP32 = false;
+                document.getElementById('sourceText').innerText = "Laptop Webcam";
+                imgEl.style.display = 'none';
+                videoEl.style.display = 'block';
+                startWebcam();
+            } else {
+                useESP32 = true;
+                espIP = document.getElementById('espIpInput').value;
+                document.getElementById('sourceText').innerText = "ESP32 (" + espIP + ")";
+                videoEl.style.display = 'none';
+                imgEl.style.display = 'block';
+                startEspLoop();
+            }
+
+            // Enable buttons
+            document.getElementById('btnEnroll').disabled = false;
+            document.getElementById('btnRecognize').disabled = false;
+        }
+
+        // Start Laptop Webcam
+        function startWebcam() {
+            navigator.mediaDevices.getUserMedia({ video: {} })
+                .then(stream => {
+                    videoEl.srcObject = stream;
+                })
+                .catch(err => alert("Webcam Error: " + err));
+        }
+
+        // Start ESP32 Loop (Polling)
+        async function startEspLoop() {
+            // We continuously fetch the image from the ESP32
+            const loop = async () => {
+                if (!useESP32) return;
+
+                try {
+                    // Add random number to prevent browser caching
+                    const url = `http://${espIP}/capture?t=${Date.now()}`;
+
+                    // We load the image into the <img> tag
+                    await new Promise((resolve, reject) => {
+                        imgEl.onload = resolve;
+                        imgEl.onerror = reject;
+                        imgEl.src = url;
+                    });
+
+                    // If we are recognizing, run the AI on this new frame
+                    if (isRecognizing) {
+                        detectAndDraw(imgEl);
+                    }
+                } catch (e) {
+                    console.log("ESP32 Fetch Error - retrying...");
+                }
+
+                // Repeat as fast as possible (or add delay if needed)
+                requestAnimationFrame(loop);
+            };
+            loop();
+        }
+
+        // For Webcam, we use the 'play' event to trigger continuous detection
+        videoEl.addEventListener('play', () => {
+            const displaySize = { width: videoEl.width || 640, height: videoEl.height || 480 };
+            faceapi.matchDimensions(canvas, displaySize);
+
+            setInterval(async () => {
+                if (!useESP32 && isRecognizing) {
+                    detectAndDraw(videoEl);
+                }
+            }, 100); // Check every 100ms
+        });
+
+        // =====================================================================
+        // 2. CORE AI LOGIC (Detection & Matching)
+        // =====================================================================
+
+        async function detectAndDraw(inputImage) {
+            // 1. Detect Face
+            const detection = await faceapi.detectSingleFace(inputImage).withFaceLandmarks().withFaceDescriptor();
+
+            // Clear previous drawings
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Resize canvas to match image
+            const dims = faceapi.matchDimensions(canvas, inputImage, true);
+
+            if (detection) {
+                // 2. Resize detection to fit canvas
+                const resizedDetections = faceapi.resizeResults(detection, dims);
+
+                // 3. Compare with Enrolled Faces
+                let bestMatch = { label: 'Unknown', distance: 1.0 };
+
+                if (labeledDescriptors.length > 0) {
+                    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, MATCH_THRESHOLD);
+                    bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+                }
+
+                // 4. Draw Box & Label
+                const box = resizedDetections.detection.box;
+                const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.toString() });
+                drawBox.draw(canvas);
+
+                // 5. Mark Attendance if Known
+                if (bestMatch.label !== 'unknown') {
+                    markAttendance(bestMatch.label);
+                }
+            }
+        }
+
+        // =====================================================================
+        // 3. ENROLLMENT LOGIC (WITH VISUAL FEEDBACK!)
+        // =====================================================================
+
+        async function startEnrollment() {
+            const name = document.getElementById('studentName').value;
+            if (!name) { alert("Please enter a name first!"); return; }
+
+            const msg = document.getElementById('enrollMsg');
+            msg.innerText = "Stay still! Taking photos...";
+
+            const descriptors = [];
+            let failures = 0;
+
+            // Take 3 samples
+            for (let i = 0; i < SAMPLES_TO_TAKE; i++) {
+                msg.innerText = `Capturing ${i + 1}/${SAMPLES_TO_TAKE}...`;
+                msg.style.color = "#333";
+
+                // Get current frame (Webcam or ESP Image)
+                const input = useESP32 ? imgEl : videoEl;
+
+                // EDUCATIONAL: We use a tiny delay to let the UI update before heavy processing
+                await new Promise(r => setTimeout(r, 50));
+
+                const detection = await faceapi.detectSingleFace(input).withFaceLandmarks().withFaceDescriptor();
+
+                // VISUAL FEEDBACK: Draw a bounding box to show kids what's happening!
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                const dims = faceapi.matchDimensions(canvas, input, true);
+
+                if (detection) {
+                    // SUCCESS! Draw GREEN box with GLOW
+                    const resizedDetections = faceapi.resizeResults(detection, dims);
+                    const box = resizedDetections.detection.box;
+
+                    // Draw a thick green box with glow effect
+                    ctx.strokeStyle = '#2ecc71';
+                    ctx.lineWidth = 4;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = '#2ecc71';
+                    ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                    // Add checkmark emoji
+                    ctx.font = 'bold 30px Arial';
+                    ctx.fillStyle = '#2ecc71';
+                    ctx.fillText('✓', box.x + box.width - 40, box.y + 35);
+
+                    // Reset shadow
+                    ctx.shadowBlur = 0;
+
+                    descriptors.push(detection.descriptor);
+                    // Background flash for extra feedback
+                    document.body.style.backgroundColor = "#e8f8f5";
+                    setTimeout(() => document.body.style.backgroundColor = "var(--bg)", 100);
+                    failures = 0; // Reset failure count
+                } else {
+                    // FAILED! Draw RED warning
+                    ctx.font = 'bold 24px Arial';
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('❌ No Face Found!', canvas.width / 2, canvas.height / 2);
+                    ctx.textAlign = 'left';
+
+                    i--; // Retry this shot
+                    failures++;
+                    msg.innerText = `Face not found! Move closer/still. (Retry ${failures})`;
+                    msg.style.color = "red";
+                    console.log("No face found, retrying...");
+
+                    // If too many failures, pause a bit longer to let user adjust
+                    if (failures > 10) {
+                        alert("Camera cannot see a face clearly. Please check lighting or move closer.");
+                        failures = 0;
+                    }
+                    await new Promise(r => setTimeout(r, 500)); // Wait longer on failure
+                    continue;
+                }
+
+                // Small delay between successful shots (reduced from 500ms for speed)
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            // Save the new enrollment
+            if (descriptors.length > 0) {
+                msg.innerText = "Processing biometric data...";
+                msg.style.color = "blue";
+
+                // SIMULATED DELAY (Requested by User)
+                // We disable buttons to simulate "Algorithm Processing"
+                document.getElementById('btnEnroll').disabled = true;
+                document.getElementById('btnRecognize').disabled = true;
+
+                let countdown = 10; // 10 seconds delay
+                const processingInterval = setInterval(() => {
+                    msg.innerText = `Processing Face ID... Please wait ${countdown}s`;
+                    countdown--;
+                    if (countdown < 0) {
+                        clearInterval(processingInterval);
+                        finalizeEnrollment(name, descriptors);
+                    }
+                }, 1000);
+
+            } else {
+                msg.innerText = "Failed. Could not see a face.";
+            }
+        }
+
+        function finalizeEnrollment(name, descriptors) {
+            const newEnrollment = new faceapi.LabeledFaceDescriptors(name, descriptors);
+            labeledDescriptors.push(newEnrollment);
+            saveEnrollments(); // Save to localStorage
+
+            const msg = document.getElementById('enrollMsg');
+            msg.innerText = `Success! ${name} enrolled. Ready for recognition.`;
+            msg.style.color = "green";
+
+            updateEnrolledCount();
+            document.getElementById('studentName').value = "";
+
+            // Re-enable buttons
+            document.getElementById('btnEnroll').disabled = false;
+            document.getElementById('btnRecognize').disabled = false;
+        }
+
+        // =====================================================================
+        // 4. ATTENDANCE & DATA MANAGEMENT
+        // =====================================================================
+
+        function markAttendance(name) {
+            // Only mark if not already present
+            if (!attendance[name]) {
+                const time = new Date().toLocaleTimeString();
+                attendance[name] = time;
+
+                // Add to UI
+                const list = document.getElementById('attendanceList');
+                const row = document.createElement('div');
+                row.className = 'student-row present';
+                row.innerHTML = `<span>✅ ${name}</span> <span>${time}</span>`;
+                list.prepend(row);
+
+                // Play a small beep (optional)
+                // const audio = new Audio('beep.mp3'); audio.play();
+            }
+        }
+
+        function toggleRecognition() {
+            isRecognizing = !isRecognizing;
+            const btn = document.getElementById('btnRecognize');
+            if (isRecognizing) {
+                btn.innerText = "⏹ Stop Recognition";
+                btn.classList.replace('btn-success', 'btn-danger');
+            } else {
+                btn.innerText = "▶ Start Recognition";
+                btn.classList.replace('btn-danger', 'btn-success');
+            }
+        }
+
+        function updateThreshold(val) {
+            MATCH_THRESHOLD = parseFloat(val);
+            document.getElementById('thresholdValue').innerText = val;
+        }
+
+        // Save/Load from LocalStorage
+        function saveEnrollments() {
+            // We can't save raw Float32Arrays to JSON, so we convert them to Arrays
+            const json = labeledDescriptors.map(d => ({
+                label: d.label,
+                descriptors: d.descriptors.map(desc => Array.from(desc))
+            }));
+            localStorage.setItem('face_db', JSON.stringify(json));
+        }
+
+        function loadEnrollments() {
+            const data = localStorage.getItem('face_db');
+            if (data) {
+                const parsed = JSON.parse(data);
+                labeledDescriptors = parsed.map(d => {
+                    // Convert back to Float32Array for face-api
+                    const float32s = d.descriptors.map(arr => new Float32Array(arr));
+                    return new faceapi.LabeledFaceDescriptors(d.label, float32s);
+                });
+                updateEnrolledCount();
+            }
+        }
+
+        function updateEnrolledCount() {
+            document.getElementById('enrolledCount').innerText = labeledDescriptors.length;
+        }
+
+        function clearAttendance() {
+            attendance = {};
+            document.getElementById('attendanceList').innerHTML = "";
+        }
+
+        function downloadCSV() {
+            let csv = "Name,Time\n";
+            for (const [name, time] of Object.entries(attendance)) {
+                csv += `${name},${time}\n`;
+            }
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `attendance_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+        }
+    </script>
+</body>
+
+</html>
