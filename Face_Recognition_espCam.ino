@@ -3,17 +3,21 @@
 #include "esp_camera.h"
 #include "esp_timer.h"
 #include "img_converters.h"
-#include "soc/rtc_cntl_reg.h"
-#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h" // Disable brownout problems
+#include "soc/soc.h"          // Disable brownout problems
 #include <WiFi.h>
 
-
+// =============================================================================
+//                                 USER SETTINGS
+// =============================================================================
+// ENTER YOUR WIFI CREDENTIALS HERE
 const char *ssid = "MySpyCar";
 const char *password = "123456789";
 
-const char *ap_ssid = "ESP32-CAM-Attend";
-const char *ap_password = "123456789";
-
+// =============================================================================
+//                                PIN DEFINITIONS
+// =============================================================================
+// AI-THINKER ESP32-CAM PIN MAP
 #define PWDN_GPIO_NUM 32
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM 0
@@ -37,12 +41,14 @@ const char *ap_password = "123456789";
 WiFiServer server(80);
 
 void setup() {
+  // 1. Disable brownout detector
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println();
 
+  // 2. Camera Configuration
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -65,57 +71,40 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
 
-  // Resolution: VGA (640x480) is good for face rec. CIF (400x296) is faster.
-  config.frame_size = FRAMESIZE_VGA;
+  // Resolution: CIF (400x296) is much faster than VGA for streaming
+  config.frame_size = FRAMESIZE_CIF;
   config.jpeg_quality =
-      12; // 0-63, lower is higher quality. 10-12 is good balance.
+      20; // Higher number = lower quality (smaller file, faster speed)
   config.fb_count = 1;
 
+  // Camera Init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
 
+  // Turn off Flash LED
   pinMode(FLASH_LED_GPIO, OUTPUT);
   digitalWrite(FLASH_LED_GPIO, LOW);
 
-  if (String(ssid).length() > 0) {
-    // Try Station Mode
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    Serial.print("Connecting to WiFi");
+  // 3. Connect to WiFi (Station Mode Only)
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
 
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED && retries < 20) {
-      delay(500);
-      Serial.print(".");
-      retries++;
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("");
-      Serial.println("WiFi connected");
-      Serial.print("Camera Ready! Use this IP: http://");
-      Serial.println(WiFi.localIP());
-    } else {
-      Serial.println("\nWiFi connection failed. Falling back to AP Mode.");
-      setupAP();
-    }
-  } else {
-    setupAP();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
-  server.begin();
-}
 
-void setupAP() {
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ap_ssid, ap_password);
   Serial.println("");
-  Serial.println("AP Mode Started");
-  Serial.print("Connect your laptop to WiFi: ");
-  Serial.println(ap_ssid);
-  Serial.print("Camera IP: http://");
-  Serial.println(WiFi.softAPIP());
+  Serial.println("WiFi connected");
+  Serial.print("Camera Ready! Use this IP: http://");
+  Serial.println(WiFi.localIP());
+
+  // 4. Start Server
+  server.begin();
 }
 
 void loop() {
@@ -123,6 +112,8 @@ void loop() {
   if (!client) {
     return;
   }
+
+  // Wait for data
   unsigned long timeout = millis() + 3000;
   while (!client.available() && millis() < timeout) {
     delay(1);
@@ -132,18 +123,22 @@ void loop() {
     return;
   }
 
+  // Read request
   String req = client.readStringUntil('\r');
-  client.readStringUntil('\n');
+  client.readStringUntil('\n'); // Discard rest
+
+  // Handle /capture
   if (req.indexOf("GET /capture") != -1) {
     camera_fb_t *fb = NULL;
     fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Camera capture failed");
       client.println("HTTP/1.1 500 Internal Server Error");
-      client.println();
       client.stop();
       return;
     }
+
+    // Send Headers (CORS enabled)
     client.println("HTTP/1.1 200 OK");
     client.println("Access-Control-Allow-Origin: *");
     client.println("Content-Type: image/jpeg");
@@ -151,16 +146,23 @@ void loop() {
     client.print("Content-Length: ");
     client.println(fb->len);
     client.println();
+
+    // Send Image
     client.write(fb->buf, fb->len);
     esp_camera_fb_return(fb);
   } else {
+    // Info Page
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/html");
     client.println();
     client.println("<h1>ESP32-CAM Attendance</h1>");
+    client.print("<p>Connected to: ");
+    client.print(ssid);
+    client.println("</p>");
     client.println(
         "<p>Go to <a href='/capture'>/capture</a> to see a snapshot.</p>");
   }
+
   delay(20);
   client.stop();
 }

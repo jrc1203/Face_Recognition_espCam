@@ -380,8 +380,8 @@
                     console.log("ESP32 Fetch Error - retrying...");
                 }
 
-                // Repeat as fast as possible (or add delay if needed)
-                requestAnimationFrame(loop);
+                // Repeat with a small delay to prevent network congestion
+                setTimeout(() => requestAnimationFrame(loop), 100);
             };
             loop();
         }
