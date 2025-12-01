@@ -7,9 +7,10 @@
 #include "soc/soc.h"          
 #include <WiFi.h>
 
-//wifi name and pass
+
 const char *ssid = "MySpyCar";
 const char *password = "123456789";
+
 
 #define PWDN_GPIO_NUM 32
 #define RESET_GPIO_NUM -1
@@ -67,17 +68,16 @@ void setup() {
   // Resolution: CIF (400x296) 
   config.frame_size = FRAMESIZE_CIF;
   config.jpeg_quality =
-      20; 
+      20; // Higher number = lower quality (smaller file, faster speed)
   config.fb_count = 1;
 
-  // Camera initialise
+  // Camera Init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
 
-  // Turn off Flash LED
   pinMode(FLASH_LED_GPIO, OUTPUT);
   digitalWrite(FLASH_LED_GPIO, LOW);
 
@@ -112,9 +112,11 @@ void loop() {
     return;
   }
 
+  // Read request
   String req = client.readStringUntil('\r');
   client.readStringUntil('\n'); // Discard rest
 
+  // Handle /capture
   if (req.indexOf("GET /capture") != -1) {
     camera_fb_t *fb = NULL;
     fb = esp_camera_fb_get();
@@ -133,13 +135,27 @@ void loop() {
     client.println(fb->len);
     client.println();
 
+    // Send Image
     client.write(fb->buf, fb->len);
     esp_camera_fb_return(fb);
+  }
+  else if (req.indexOf("GET /flash") != -1) {
+    if (req.indexOf("state=1") != -1) {
+      digitalWrite(FLASH_LED_GPIO, HIGH);
+    } else if (req.indexOf("state=0") != -1) {
+      digitalWrite(FLASH_LED_GPIO, LOW);
+    }
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Access-Control-Allow-Origin: *");
+    client.println("Content-Type: text/plain");
+    client.println();
+    client.println("OK");
   } else {
     client.println("HTTP/1.1 200 OK");
     client.println("Content-Type: text/html");
     client.println();
-    client.println("<h1>ESP32-CAM Attendance</h1>");
+    client.println("<h1>ESP32-CAM Attendance (BETA)</h1>");
     client.print("<p>Connected to: ");
     client.print(ssid);
     client.println("</p>");

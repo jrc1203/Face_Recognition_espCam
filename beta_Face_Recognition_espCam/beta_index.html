@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom Face Attendance (BETA)</title>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --success: #2ecc71;
+            --danger: #e74c3c;
+            --warning: #f1c40f;
+            --bg: #f5f7fa;
+            --panel: #ffffff;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1200px;
+            width: 100%;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .video-panel {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls-panel {
+            flex: 1;
+            min-width: 300px;
+            background: var(--panel);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        #videoElement,
+        #espImage {
+            display: none;
+            max-width: 640px;
+            max-height: 480px;
+        }
+
+        #canvasOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+            margin-bottom: 5px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: #333;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .status-box {
+            padding: 10px;
+            background: #eee;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .attendance-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border-top: 2px solid #eee;
+            margin-top: 10px;
+        }
+
+        .student-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .student-row.present {
+            background-color: #e8f8f5;
+        }
+
+        #startupOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .source-card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .big-btn {
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+            padding: 15px;
+            font-size: 1.1em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- STARTUP SCREEN -->
+    <div id="startupOverlay">
+        <div class="source-card">
+            <h2>Classroom Attendance (BETA)</h2>
+            <p>Select Camera Source:</p>
+            <button class="btn-primary big-btn" onclick="selectSource('webcam')">💻 Laptop Webcam</button>
+            <div style="margin: 15px 0; border-top: 1px solid #eee; padding-top: 15px;">
+                <label style="font-size: 0.9em; color: #666;">ESP32 IP:</label>
+                <input type="text" id="espIpInput" value="192.168.4.1">
+                <button class="btn-success big-btn" onclick="selectSource('esp32')">📸 ESP32-CAM</button>
+            </div>
+        </div>
+    </div>
+
+    <h1>📸 Smart Classroom (BETA)</h1>
+
+    <div class="container">
+        <div class="video-panel" id="videoContainer">
+            <video id="videoElement" autoplay muted playsinline></video>
+            <img id="espImage" src="" alt="ESP32 Stream" crossorigin="anonymous">
+            <canvas id="canvasOverlay"></canvas>
+        </div>
+
+        <div class="controls-panel">
+            <div class="status-box">
+                <div><strong>Status:</strong> <span id="statusText">Loading models...</span></div>
+                <div><strong>Source:</strong> <span id="sourceText">None</span></div>
+                <div><strong>Enrolled:</strong> <span id="enrolledCount">0</span></div>
+            </div>
+
+            <!-- Flashlight Control (Hidden by default) -->
+            <div id="flashControl" style="display:none; margin-top: 10px;">
+                <button class="btn-warning" onclick="toggleFlash()">💡 Toggle Flashlight</button>
+            </div>
+
+            <hr>
+
+            <div>
+                <h3>1. Enroll</h3>
+                <input type="text" id="studentName" placeholder="Student Name">
+                <br><br>
+                <button class="btn-primary" id="btnEnroll" onclick="startEnrollment()" disabled>Enroll Face</button>
+                <p id="enrollMsg" style="font-size: 0.8em; color: #666;"></p>
+            </div>
+
+            <hr>
+
+            <div>
+                <h3>2. Attendance</h3>
+                <button class="btn-success" id="btnRecognize" onclick="toggleRecognition()" disabled>▶ Start
+                    Recognition</button>
+                <div style="margin-top: 10px;">
+                    <label>Threshold:</label>
+                    <input type="range" id="thresholdSlider" min="0.4" max="0.9" step="0.05" value="0.6"
+                        onchange="updateThreshold(this.value)">
+                    <span id="thresholdValue">0.6</span>
+                </div>
+            </div>
+
+            <hr>
+
+            <div>
+                <h3>3. Data & Backup</h3>
+                <button onclick="downloadCSV()">📂 Export CSV</button>
+                <button class="btn-danger" onclick="clearAttendance()">🗑️ Clear Session</button>
+                <br>
+                <button class="btn-warning" onclick="downloadBackup()">💾 Backup DB</button>
+                <button class="btn-warning" onclick="document.getElementById('restoreFile').click()">📂 Restore
+                    DB</button>
+                <input type="file" id="restoreFile" style="display:none" onchange="uploadBackup(this)">
+            </div>
+
+            <div class="attendance-list" id="attendanceList"></div>
+        </div>
+    </div>
+
+    <script>
+        let useESP32 = false;
+        let espIP = "192.168.4.1";
+        let isRecognizing = false;
+        let labeledDescriptors = [];
+        let attendance = {};
+        let unknownTimer = 0; // For Stranger Danger logic
+        let flashState = false;
+
+        const SAMPLES_TO_TAKE = 3;
+        let MATCH_THRESHOLD = 0.6;
+
+        const videoEl = document.getElementById('videoElement');
+        const imgEl = document.getElementById('espImage');
+        const canvas = document.getElementById('canvasOverlay');
+        const statusText = document.getElementById('statusText');
+
+        // Load Models
+        Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'),
+            faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model'),
+            faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model')
+        ]).then(() => {
+            console.log("Models Loaded!");
+            statusText.innerText = "Models Loaded. Select Camera.";
+            loadEnrollments();
+        });
+
+        async function selectSource(source) {
+            document.getElementById('startupOverlay').style.display = 'none';
+            if (source === 'webcam') {
+                useESP32 = false;
+                document.getElementById('sourceText').innerText = "Laptop Webcam";
+                imgEl.style.display = 'none';
+                videoEl.style.display = 'block';
+                startWebcam();
+            } else {
+                useESP32 = true;
+                espIP = document.getElementById('espIpInput').value;
+                document.getElementById('sourceText').innerText = "ESP32 (" + espIP + ")";
+                videoEl.style.display = 'none';
+                imgEl.style.display = 'block';
+                document.getElementById('flashControl').style.display = 'block'; // Show Flash Button
+                startEspLoop();
+            }
+            document.getElementById('btnEnroll').disabled = false;
+            document.getElementById('btnRecognize').disabled = false;
+        }
+
+        function startWebcam() {
+            navigator.mediaDevices.getUserMedia({ video: {} }).then(stream => {
+                videoEl.srcObject = stream;
+            }).catch(err => alert("Webcam Error: " + err));
+        }
+
+        async function startEspLoop() {
+            const loop = async () => {
+                if (!useESP32) return;
+                try {
+                    const url = `http://${espIP}/capture?t=${Date.now()}`;
+                    await new Promise((resolve, reject) => {
+                        imgEl.onload = resolve;
+                        imgEl.onerror = reject;
+                        imgEl.src = url;
+                    });
+                    if (isRecognizing) detectAndDraw(imgEl);
+                } catch (e) { console.log("ESP32 Fetch Error"); }
+                setTimeout(() => requestAnimationFrame(loop), 100);
+            };
+            loop();
+        }
+
+        videoEl.addEventListener('play', () => {
+            const displaySize = { width: videoEl.width || 640, height: videoEl.height || 480 };
+            faceapi.matchDimensions(canvas, displaySize);
+            setInterval(async () => {
+                if (!useESP32 && isRecognizing) detectAndDraw(videoEl);
+            }, 100);
+        });
+
+        async function detectAndDraw(inputImage) {
+            const detection = await faceapi.detectSingleFace(inputImage).withFaceLandmarks().withFaceDescriptor();
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const dims = faceapi.matchDimensions(canvas, inputImage, true);
+
+            if (detection) {
+                const resizedDetections = faceapi.resizeResults(detection, dims);
+                let bestMatch = { label: 'Unknown', distance: 1.0 };
+
+                if (labeledDescriptors.length > 0) {
+                    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, MATCH_THRESHOLD);
+                    bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+                }
+
+                // STRANGER DANGER LOGIC
+                let boxColor = '#2ecc71'; // Green default
+                if (bestMatch.label === 'unknown') {
+                    unknownTimer += 100; // Add 100ms
+                    if (unknownTimer > 5000) {
+                        boxColor = '#e74c3c'; // RED after 5s
+                        // Optional: Play warning sound here
+                        // new Audio('warning.mp3').play(); 
+                    }
+                } else {
+                    unknownTimer = 0; // Reset if known
+                    markAttendance(bestMatch.label);
+                }
+
+                const box = resizedDetections.detection.box;
+                const drawBox = new faceapi.draw.DrawBox(box, {
+                    label: bestMatch.toString(),
+                    boxColor: boxColor
+                });
+                drawBox.draw(canvas);
+            } else {
+                unknownTimer = 0; // Reset if no face
+            }
+        }
+
+        async function startEnrollment() {
+            const name = document.getElementById('studentName').value;
+            if (!name) { alert("Enter name!"); return; }
+            const msg = document.getElementById('enrollMsg');
+            msg.innerText = "Taking photos...";
+            const descriptors = [];
+
+            for (let i = 0; i < SAMPLES_TO_TAKE; i++) {
+                msg.innerText = `Capturing ${i + 1}/${SAMPLES_TO_TAKE}...`;
+                const input = useESP32 ? imgEl : videoEl;
+                await new Promise(r => setTimeout(r, 50));
+                const detection = await faceapi.detectSingleFace(input).withFaceLandmarks().withFaceDescriptor();
+
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                const dims = faceapi.matchDimensions(canvas, input, true);
+
+                if (detection) {
+                    const resized = faceapi.resizeResults(detection, dims);
+                    new faceapi.draw.DrawBox(resized.detection.box, { label: "Enrolling", boxColor: "#2ecc71" }).draw(canvas);
+                    descriptors.push(detection.descriptor);
+                    document.body.style.backgroundColor = "#e8f8f5";
+                    setTimeout(() => document.body.style.backgroundColor = "var(--bg)", 100);
+                } else {
+                    i--;
+                    msg.innerText = "Face not found! Retry...";
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+                await new Promise(r => setTimeout(r, 200));
+            }
+
+            if (descriptors.length > 0) {
+                msg.innerText = "Processing...";
+                setTimeout(() => {
+                    const newEnrollment = new faceapi.LabeledFaceDescriptors(name, descriptors);
+                    labeledDescriptors.push(newEnrollment);
+                    saveEnrollments();
+                    msg.innerText = "Enrolled!";
+                    updateEnrolledCount();
+                    document.getElementById('studentName').value = "";
+                }, 2000);
+            }
+        }
+
+        function markAttendance(name) {
+            if (!attendance[name]) {
+                const time = new Date().toLocaleTimeString();
+                attendance[name] = time;
+
+                // AUDIO FEEDBACK
+                const utterance = new SpeechSynthesisUtterance("Welcome " + name);
+                speechSynthesis.speak(utterance);
+
+                const list = document.getElementById('attendanceList');
+                const row = document.createElement('div');
+                row.className = 'student-row present';
+                row.innerHTML = `<span>✅ ${name}</span> <span>${time}</span>`;
+                list.prepend(row);
+            }
+        }
+
+        function toggleFlash() {
+            flashState = !flashState;
+            const state = flashState ? 1 : 0;
+            fetch(`http://${espIP}/flash?state=${state}`)
+                .then(res => console.log("Flash toggled"))
+                .catch(err => console.error("Flash Error", err));
+        }
+
+        function toggleRecognition() {
+            isRecognizing = !isRecognizing;
+            const btn = document.getElementById('btnRecognize');
+            if (isRecognizing) {
+                btn.innerText = "⏹ Stop";
+                btn.classList.replace('btn-success', 'btn-danger');
+            } else {
+                btn.innerText = "▶ Start";
+                btn.classList.replace('btn-danger', 'btn-success');
+            }
+        }
+
+        function updateThreshold(val) {
+            MATCH_THRESHOLD = parseFloat(val);
+            document.getElementById('thresholdValue').innerText = val;
+        }
+
+        function saveEnrollments() {
+            const json = labeledDescriptors.map(d => ({
+                label: d.label,
+                descriptors: d.descriptors.map(desc => Array.from(desc))
+            }));
+            localStorage.setItem('face_db', JSON.stringify(json));
+        }
+
+        function loadEnrollments() {
+            const data = localStorage.getItem('face_db');
+            if (data) {
+                const parsed = JSON.parse(data);
+                labeledDescriptors = parsed.map(d => {
+                    const float32s = d.descriptors.map(arr => new Float32Array(arr));
+                    return new faceapi.LabeledFaceDescriptors(d.label, float32s);
+                });
+                updateEnrolledCount();
+            }
+        }
+
+        function updateEnrolledCount() {
+            document.getElementById('enrolledCount').innerText = labeledDescriptors.length;
+        }
+
+        function clearAttendance() {
+            attendance = {};
+            document.getElementById('attendanceList').innerHTML = "";
+        }
+
+        function downloadCSV() {
+            let csv = "Name,Time\n";
+            for (const [name, time] of Object.entries(attendance)) {
+                csv += `${name},${time}\n`;
+            }
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `attendance_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+        }
+
+        // BACKUP & RESTORE
+        function downloadBackup() {
+            const data = localStorage.getItem('face_db');
+            if (!data) { alert("No data to backup!"); return; }
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `face_db_backup.json`;
+            a.click();
+        }
+
+        function uploadBackup(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    // Basic validation
+                    if (!Array.isArray(json)) throw new Error("Invalid format");
+                    localStorage.setItem('face_db', JSON.stringify(json));
+                    loadEnrollments();
+                    alert("Database Restored Successfully!");
+                } catch (err) {
+                    alert("Error restoring file: " + err);
+                }
+            };
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+
+</html>
