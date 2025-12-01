@@ -11,17 +11,16 @@ Browser-based attendance system using face recognition. Works with ESP32-CAM or 
    - Note the IP address from Serial Monitor.
 
 2. **Web App**
-   - Serve `index.html` using a local server (e.g., Python `python -m http.server` or VS Code Live Server).
-   - Open the hosted URL (e.g., `http://localhost:8000`).
+   - Run/open `index.html` .
 
 ## Usage
 
-1. **Select Source**: Choose "Laptop Webcam" or enter ESP32 IP and click "Use ESP32-CAM".
+1. **Select Source**: Choose either "Laptop Webcam" or enter ESP32 IP and click "Use ESP32-CAM".
 2. **Enroll**: Enter name, click "Enroll". System takes 3 samples.
 3. **Attendance**: Click "Start Recognition". Detected faces are marked present.
 4. **Export**: Click "Export CSV" to save attendance log.
 
 ## Notes
-- Ensure laptop and ESP32 are on the same WiFi.
+- Ensure laptop and ESP32 are on the same WiFi. or espcam is connected to the hotspot of the laptop. (Internet connection is a must)
 - Browser must have internet access to load AI models.
 - If using ESP32, performance depends on network speed.
